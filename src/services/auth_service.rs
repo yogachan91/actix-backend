@@ -1,6 +1,6 @@
 use crate::models::user::{RegisterRequest, LoginRequest, User};
 use crate::models::sistem::Sistem;
-use crate::models::verify_register::VerifyRegister; // ✅ import verify_register
+use crate::models::verify_register::VerifyRegister;
 use crate::utils::token::{generate_token, store_refresh_token, remove_refresh_token};
 use crate::db::DbPool;
 use sqlx::{query, query_as};
@@ -9,7 +9,11 @@ use argon2::password_hash::{SaltString, rand_core::OsRng, PasswordHash};
 use rand::{distributions::Alphanumeric, Rng};
 use redis::Client as RedisClient;
 use chrono::{Utc, Duration};
-use serde::Serialize; // ✅ untuk return struct
+use serde::Serialize;
+
+// ✅ SendGrid
+use sendgrid::{SGClient, Mail};
+use std::env;
 
 #[derive(Debug, Serialize)]
 pub struct RegisterResult {
@@ -47,7 +51,7 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
 
     let expired_days = sistem_row
         .and_then(|s| s.value_int)
-        .unwrap_or(30); // default 30 hari
+        .unwrap_or(30);
 
     let created_date = Utc::now();
     let expired_date = created_date + Duration::days(expired_days.into());
@@ -72,8 +76,8 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
     .bind(&req.last_name)
     .bind(&req.email)
     .bind(&hashed_password)
-    .bind(&created_date)
-    .bind(&expired_date)
+    .bind(&created_date.naive_utc())
+    .bind(&expired_date.naive_utc())
     .fetch_one(pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -88,10 +92,35 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
     .bind(&id_verify)
     .bind(&id_user)
     .bind(&req.email)
-    .bind(&created_date)
+    .bind(&created_date.naive_utc())
     .fetch_one(pool)
     .await
     .map_err(|e| e.to_string())?;
+
+    // ✅ Kirim email verifikasi
+    let sendgrid_api_key = env::var("SENDGRID_API_KEY")
+        .map_err(|_| "SENDGRID_API_KEY not set".to_string())?;
+    let sg = SGClient::new(sendgrid_api_key);
+
+    let verify_link = format!("http://185.14.92.144:3000/verify?token={}", &verify.id);
+    let subject = "Aktivasi Akun Anda";
+    let content = format!(
+        "Halo {},<br><br>Terima kasih sudah mendaftar.<br>\
+        Silakan klik link berikut untuk aktivasi akun Anda:<br>\
+        <a href=\"{}\">Aktivasi Akun</a>",
+        req.first_name, verify_link
+    );
+
+    let mail = Mail::new()
+        .add_to((&req.email[..], &format!("{} {}", req.first_name, req.last_name)))
+        .add_from("noreply@yourdomain.com") // ⚠️ ganti dengan email valid di akun SendGrid
+        .add_subject(subject)
+        .add_html(content);
+
+    match sg.send(mail) {
+        Ok(_) => println!("✅ Email verifikasi terkirim ke {}", req.email),
+        Err(e) => eprintln!("❌ Gagal kirim email: {:?}", e),
+    }
 
     Ok(RegisterResult { user, verify })
 }
