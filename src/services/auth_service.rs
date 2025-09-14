@@ -113,7 +113,7 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
 
     let mail = Mail::new()
         .add_to((&req.email[..], &format!("{} {}", req.first_name, req.last_name)))
-        .add_from("noreply@yourdomain.com") // ⚠️ ganti dengan email valid di akun SendGrid
+        .add_from("yogachandraw@gmail.com") // ⚠️ ganti dengan email valid di akun SendGrid
         .add_subject(subject)
         .add_html(content);
 
