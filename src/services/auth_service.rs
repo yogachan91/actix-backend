@@ -11,8 +11,8 @@ use redis::Client as RedisClient;
 use chrono::{Utc, Duration};
 use serde::Serialize;
 
-// ✅ SendGrid
-use sendgrid::{SGClient, Mail};
+// ✅ SendGrid v3
+use sendgrid::v3::{Destination, Mail, SGClient};
 use std::env;
 
 #[derive(Debug, Serialize)]
@@ -112,12 +112,15 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
     );
 
     let mail = Mail::new()
-        .add_to((&req.email[..], &format!("{} {}", req.first_name, req.last_name)))
-        .add_from("yogachandraw@gmail.com") // ⚠️ ganti dengan email valid di akun SendGrid
+        .add_to(Destination {
+            address: &req.email,
+            name: &format!("{} {}", req.first_name, req.last_name),
+        })
+        .add_from("yogachandraw@gmail.com") // ⚠️ ganti dengan email valid di SendGrid
         .add_subject(subject)
         .add_html(content);
 
-    match sg.send(mail) {
+    match sg.send(mail).await {
         Ok(_) => println!("✅ Email verifikasi terkirim ke {}", req.email),
         Err(e) => eprintln!("❌ Gagal kirim email: {:?}", e),
     }
