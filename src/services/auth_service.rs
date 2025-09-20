@@ -10,10 +10,10 @@ use rand::{distributions::Alphanumeric, Rng};
 use redis::Client as RedisClient;
 use chrono::{Utc, Duration};
 use serde::Serialize;
-
-// ✅ SendGrid v0.24.1
-use sendgrid::v3::{SGClient, V3Mail, Email, Content, Personalization};
 use std::env;
+
+use reqwest::Client as HttpClient;
+use serde_json::json;
 
 #[derive(Debug, Serialize)]
 pub struct RegisterResult {
@@ -30,7 +30,7 @@ fn generate_random_id() -> String {
 }
 
 pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<RegisterResult, String> {
-    // ✅ Cek duplicate email
+    // 1) Cek duplicate email (status = 2)
     let existing = query("SELECT id FROM users WHERE email = $1 AND status = 2")
         .bind(&req.email)
         .fetch_optional(pool)
@@ -41,7 +41,7 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
         return Err("Error! Email tersebut duplicate".to_string());
     }
 
-    // ✅ Ambil expired_days dari tabel sistem
+    // 2) Ambil expired_days dari tabel sistem
     let sistem_row: Option<Sistem> = query_as::<_, Sistem>(
         "SELECT * FROM sistem WHERE nama = 'EXPIRED_REGISTER' LIMIT 1"
     )
@@ -56,7 +56,7 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
     let created_date = Utc::now();
     let expired_date = created_date + Duration::days(expired_days.into());
 
-    // ✅ Hash password
+    // 3) Hash password (argon2)
     let salt = SaltString::generate(&mut OsRng);
     let hashed_password = Argon2::default()
         .hash_password(req.password.as_bytes(), &salt)
@@ -65,7 +65,7 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
 
     let id_user = generate_random_id();
 
-    // ✅ Insert ke users
+    // 4) Insert ke users
     let user = query_as::<_, User>(
         "INSERT INTO users (id, first_name, last_name, email, password, status, aktif, created_date, expired_date) 
          VALUES ($1, $2, $3, $4, $5, 2, 0, $6, $7) 
@@ -82,7 +82,7 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
     .await
     .map_err(|e| e.to_string())?;
 
-    // ✅ Insert ke verify_register
+    // 5) Insert ke verify_register
     let id_verify = generate_random_id();
     let verify = query_as::<_, VerifyRegister>(
         "INSERT INTO verify_register (id, id_user, email, aktif, created_date) 
@@ -97,10 +97,11 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
     .await
     .map_err(|e| e.to_string())?;
 
-    // ✅ Kirim email verifikasi (SendGrid v0.24.1)
+    // 6) Kirim email verifikasi via SendGrid HTTP API (reqwest)
     let sendgrid_api_key = env::var("SENDGRID_API_KEY")
         .map_err(|_| "SENDGRID_API_KEY not set".to_string())?;
-    let sg = SGClient::new(sendgrid_api_key);
+
+    let http = HttpClient::new();
 
     let verify_link = format!("http://185.14.92.144:3000/verify?token={}", &verify.id);
     let subject = "Aktivasi Akun Anda";
@@ -111,28 +112,41 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
         req.first_name, verify_link
     );
 
-    // ✅ Build email
-    let from = Email::new("yogachandraw@gmail.com").set_name("Admin");
-    let to = Email::new(&req.email).set_name(&format!("{} {}", req.first_name, req.last_name));
-    let personalization = Personalization::new(to);
-
-    let mail = V3Mail::new()
-        .set_from(from)
-        .set_subject(subject)
-        .add_content(Content::new().set_content_type("text/html").set_value(content_html))
-        .add_personalization(personalization);
-
-    match sg.send(&mail).await {
-        Ok(response) => {
-            if response.status().is_success() {
-                println!("✅ Email verifikasi terkirim ke {}", req.email);
-            } else {
-                eprintln!("❌ Gagal kirim email: {:?}", response);
+    // body sesuai spec /v3/mail/send
+    let body = json!({
+        "personalizations": [
+            {
+                "to": [
+                    { "email": req.email, "name": format!("{} {}", req.first_name, req.last_name) }
+                ],
+                "subject": subject
             }
-        }
-        Err(e) => eprintln!("❌ Error kirim email: {:?}", e),
+        ],
+        "from": { "email": "yogachandraw@gmail.com", "name": "Admin" },
+        "content": [
+            { "type": "text/html", "value": content_html }
+        ]
+    });
+
+    // kirim
+    let resp = http.post("https://api.sendgrid.com/v3/mail/send")
+        .bearer_auth(sendgrid_api_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send email request: {}", e))?;
+
+    if !resp.status().is_success() {
+        let txt = resp.text().await.unwrap_or_else(|_| "<no-body>".to_string());
+        // log server-side, tapi jangan fail proses register (opsional)
+        eprintln!("SendGrid send failed. status={} body={}", resp.status(), txt);
+        // jika kamu ingin return error ke client, uncomment baris berikut:
+        // return Err(format!("Failed send verification email: {}", resp.status()));
+    } else {
+        println!("✅ Email verifikasi terkirim ke {}", req.email);
     }
 
+    // 7) Return hasil
     Ok(RegisterResult { user, verify })
 }
 
