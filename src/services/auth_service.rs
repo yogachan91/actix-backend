@@ -136,12 +136,12 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
         .await
         .map_err(|e| format!("Failed to send email request: {}", e))?;
 
-    if !resp.status().is_success() {
-        let txt = resp.text().await.unwrap_or_else(|_| "<no-body>".to_string());
-        // log server-side, tapi jangan fail proses register (opsional)
-        eprintln!("SendGrid send failed. status={} body={}", resp.status(), txt);
-        // jika kamu ingin return error ke client, uncomment baris berikut:
-        // return Err(format!("Failed send verification email: {}", resp.status()));
+    let status = resp.status(); // simpan status dulu
+    let txt = resp.text().await.unwrap_or_else(|_| "<no-body>".to_string());
+
+    if !status.is_success() {
+        eprintln!("SendGrid send failed. status={} body={}", status, txt);
+        // return Err(format!("Failed send verification email: {}", status));
     } else {
         println!("✅ Email verifikasi terkirim ke {}", req.email);
     }
