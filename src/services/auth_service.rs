@@ -11,8 +11,8 @@ use redis::Client as RedisClient;
 use chrono::{Utc, Duration};
 use serde::Serialize;
 
-// ✅ SendGrid v3
-use sendgrid::v3::{Destination, Mail, SGClient};
+// ✅ SendGrid v0.24.1
+use sendgrid::{Sender, Message, Content};
 use std::env;
 
 #[derive(Debug, Serialize)]
@@ -97,32 +97,36 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
     .await
     .map_err(|e| e.to_string())?;
 
-    // ✅ Kirim email verifikasi
+    // ✅ Kirim email verifikasi (SendGrid v0.24.1)
     let sendgrid_api_key = env::var("SENDGRID_API_KEY")
         .map_err(|_| "SENDGRID_API_KEY not set".to_string())?;
-    let sg = SGClient::new(sendgrid_api_key);
+
+    let sender = Sender::new(sendgrid_api_key);
 
     let verify_link = format!("http://185.14.92.144:3000/verify?token={}", &verify.id);
     let subject = "Aktivasi Akun Anda";
-    let content = format!(
+    let content_html = format!(
         "Halo {},<br><br>Terima kasih sudah mendaftar.<br>\
         Silakan klik link berikut untuk aktivasi akun Anda:<br>\
         <a href=\"{}\">Aktivasi Akun</a>",
         req.first_name, verify_link
     );
 
-    let mail = Mail::new()
-        .add_to(Destination {
-            address: &req.email,
-            name: &format!("{} {}", req.first_name, req.last_name),
-        })
-        .add_from("yogachandraw@gmail.com") // ⚠️ ganti dengan email valid di SendGrid
-        .add_subject(subject)
-        .add_html(content);
+    let message = Message::new()
+        .set_from(("yogachandraw@gmail.com", "Admin")) // ⚠️ pastikan email ini terverifikasi di SendGrid
+        .set_subject(subject)
+        .add_content(Content::new().set_content_type("text/html").set_value(content_html))
+        .add_to((&req.email, &format!("{} {}", req.first_name, req.last_name)));
 
-    match sg.send(mail).await {
-        Ok(_) => println!("✅ Email verifikasi terkirim ke {}", req.email),
-        Err(e) => eprintln!("❌ Gagal kirim email: {:?}", e),
+    match sender.send(&message).await {
+        Ok(response) => {
+            if response.status().is_success() {
+                println!("✅ Email verifikasi terkirim ke {}", req.email);
+            } else {
+                eprintln!("❌ Gagal kirim email: {:?}", response);
+            }
+        }
+        Err(e) => eprintln!("❌ Error kirim email: {:?}", e),
     }
 
     Ok(RegisterResult { user, verify })
