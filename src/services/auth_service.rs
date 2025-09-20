@@ -12,7 +12,7 @@ use chrono::{Utc, Duration};
 use serde::Serialize;
 
 // ✅ SendGrid v0.24.1
-use sendgrid::{Sender, Message, Content};
+use sendgrid::v3::{SGClient, V3Mail, Email, Content, Personalization};
 use std::env;
 
 #[derive(Debug, Serialize)]
@@ -100,8 +100,7 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
     // ✅ Kirim email verifikasi (SendGrid v0.24.1)
     let sendgrid_api_key = env::var("SENDGRID_API_KEY")
         .map_err(|_| "SENDGRID_API_KEY not set".to_string())?;
-
-    let sender = Sender::new(sendgrid_api_key);
+    let sg = SGClient::new(sendgrid_api_key);
 
     let verify_link = format!("http://185.14.92.144:3000/verify?token={}", &verify.id);
     let subject = "Aktivasi Akun Anda";
@@ -112,13 +111,18 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
         req.first_name, verify_link
     );
 
-    let message = Message::new()
-        .set_from(("yogachandraw@gmail.com", "Admin")) // ⚠️ pastikan email ini terverifikasi di SendGrid
+    // ✅ Build email
+    let from = Email::new("yogachandraw@gmail.com").set_name("Admin");
+    let to = Email::new(&req.email).set_name(&format!("{} {}", req.first_name, req.last_name));
+    let personalization = Personalization::new(to);
+
+    let mail = V3Mail::new()
+        .set_from(from)
         .set_subject(subject)
         .add_content(Content::new().set_content_type("text/html").set_value(content_html))
-        .add_to((&req.email, &format!("{} {}", req.first_name, req.last_name)));
+        .add_personalization(personalization);
 
-    match sender.send(&message).await {
+    match sg.send(&mail).await {
         Ok(response) => {
             if response.status().is_success() {
                 println!("✅ Email verifikasi terkirim ke {}", req.email);
