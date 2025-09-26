@@ -178,7 +178,7 @@ pub async fn aktivasi_user(pool: &DbPool, token: &str) -> Result<(), String> {
 
     // mencari data verifikasi user
     let user_verifikasi: Option<VerifyRegister> = query_as::<_, VerifyRegister>(
-        "SELECT id, id_user, created_date, aktif FROM verify_register WHERE id = $1 AND aktif = 1"
+        "SELECT id, id_user, email, created_date, aktif FROM verify_register WHERE id = $1 AND aktif = 1"
     )
     .bind(token)
     .fetch_optional(pool)
