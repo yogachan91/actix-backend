@@ -1,5 +1,5 @@
 use actix_web::web;
-use crate::controllers::auth_controller::{register, login, logout, refresh_token};
+use crate::controllers::auth_controller::{aktivasi_akun, login, logout, refresh_token, register};
 use crate::middlewares::auth_middleware::AuthMiddleware;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
@@ -7,6 +7,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         web::scope("/api/auth")
             .route("/register", web::post().to(register))
             .route("/login", web::post().to(login))
+            .route("/aktivasi-user/{token}", web::get().to(aktivasi_akun))
             .route("/refresh", web::post().to(refresh_token))
             .service(
                 web::scope("")

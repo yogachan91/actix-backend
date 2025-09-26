@@ -1,6 +1,7 @@
 use crate::models::user::{RegisterRequest, LoginRequest, User};
 use crate::models::sistem::Sistem;
 use crate::models::verify_register::VerifyRegister;
+use crate::models::profile::{ProfileRequest, Profile};
 use crate::utils::token::{generate_token, store_refresh_token, remove_refresh_token};
 use crate::db::DbPool;
 use sqlx::{query, query_as};
@@ -148,6 +149,84 @@ pub async fn register_user(pool: &DbPool, req: RegisterRequest) -> Result<Regist
 
     // 7) Return hasil
     Ok(RegisterResult { user, verify })
+}
+
+
+pub async fn aktivasi_user(pool: &DbPool, token: &str) -> Result<(), String> {
+    // cek apakah token valid
+    let existing = query("SELECT id FROM verify_register WHERE id = $1 AND aktif = 0")
+        .bind(token)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if existing.is_some() {
+        return Err("Error! Link aktivasi expired atau sudah tidak aktif.".to_string());
+    } 
+
+    // 2) Ambil expired_register dari tabel sistem
+    let sistem_row: Option<Sistem> = query_as::<_, Sistem>(
+        "SELECT * FROM sistem WHERE nama = 'EXPIRED_VERIFY_REGISTER' LIMIT 1"
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let expired_minutes = sistem_row
+        .and_then(|s| s.value_int)
+        .unwrap_or(60); // default 60 menit kalau null
+
+    // mencari data verifikasi user
+    let user_verifikasi: Option<VerifyRegister> = query_as::<_, VerifyRegister>(
+        "SELECT id, created_date, aktif FROM verify_register WHERE id = $1 AND aktif = 1"
+    )
+    .bind(token)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let user_verifikasi = match user_verifikasi {
+    Some(u) => u,
+    None => return Err("Error! Link aktivasi tidak ditemukan.".to_string()),
+};
+
+    // Bandingkan waktu created_date dengan expired_minutes
+    let now = chrono::Utc::now().naive_utc();
+    let expired_time = user_verifikasi.created_date + Duration::minutes(expired_minutes as i64);
+
+    if now > expired_time {
+        return Err("Error! Link aktivasi expired.".to_string());
+    }
+
+    // update verifikasi_register status nonaktif
+    query("UPDATE verify_register SET aktif = 0 WHERE id = $1")
+        .bind(token)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // update user status aktif
+    query("UPDATE users SET aktif = 1 WHERE id = $1")
+        .bind(&user_verifikasi.id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let id_profile = generate_random_id();
+
+    // 4) Insert ke users
+    let profile = query_as::<_, Profile>(
+        "INSERT INTO profile (id, id_user, gender, no_telp, company, alamat, kelurahan, kecamatan, kota, provinsi, kode_pos) 
+         VALUES ($1, $2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL) 
+         RETURNING *"
+    )
+    .bind(&id_profile)
+    .bind(&user_verifikasi.id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    Ok(())
 }
 
 pub async fn login_user(

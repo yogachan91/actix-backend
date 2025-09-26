@@ -1,5 +1,5 @@
 use actix_web::{web, HttpResponse, Responder, HttpRequest, HttpMessage};
-use crate::services::auth_service::{register_user, login_user, logout_user};
+use crate::services::auth_service::{register_user, login_user, logout_user, aktivasi_user};
 use crate::db::DbPool;
 use crate::models::user::{RegisterRequest, LoginRequest};
 use crate::utils::token::{get_refresh_token, generate_token, Claims};
@@ -18,6 +18,23 @@ pub async fn register(pool: web::Data<DbPool>, req: web::Json<RegisterRequest>) 
         Err(e) => HttpResponse::BadRequest().json(json!({ "error": e })),
     }
 }
+
+pub async fn aktivasi_akun(
+    pool: web::Data<DbPool>,
+    path: web::Path<String>, // ambil token dari path
+) -> impl Responder {
+    let token = path.into_inner();
+
+    match aktivasi_user(pool.get_ref(), &token).await {
+        Ok(_) => HttpResponse::Ok().json(json!({
+            "message": "Aktivasi akun berhasil, silakan login."
+        })),
+        Err(e) => HttpResponse::BadRequest().json(json!({
+            "error": e
+        })),
+    }
+}
+
 
 pub async fn login(
     pool: web::Data<DbPool>,
