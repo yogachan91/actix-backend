@@ -234,7 +234,7 @@ pub async fn login_user(
     redis: &RedisClient,
     req: LoginRequest
 ) -> Result<(String, String), String> {
-    let user = query_as::<_, User>("SELECT * FROM users WHERE email = $1 AND status = 2 AND aktif = 1")
+    let user = query_as::<_, User>("SELECT * FROM users WHERE email = $1 AND status != 1 AND aktif = 1")
         .bind(&req.email)
         .fetch_optional(pool)
         .await
