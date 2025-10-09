@@ -42,9 +42,10 @@ pub async fn login(
     req: web::Json<LoginRequest>
 ) -> impl Responder {
     match login_user(pool.get_ref(), redis.get_ref(), req.into_inner()).await {
-        Ok((access, refresh)) => HttpResponse::Ok().json(json!({
+        Ok((id, access, refresh)) => HttpResponse::Ok().json(json!({
             "access_token": access,
-            "refresh_token": refresh
+            "refresh_token": refresh,
+            "id": id
         })),
         Err(e) => HttpResponse::Unauthorized().json(json!({ "error": e })),
     }

@@ -233,7 +233,7 @@ pub async fn login_user(
     pool: &DbPool,
     redis: &RedisClient,
     req: LoginRequest
-) -> Result<(String, String), String> {
+) -> Result<(String, String, String), String> {
     let user = query_as::<_, User>("SELECT * FROM users WHERE email = $1 AND status != 1 AND aktif = 1")
         .bind(&req.email)
         .fetch_optional(pool)
@@ -256,7 +256,7 @@ pub async fn login_user(
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok((access_token, refresh_token))
+    Ok((user.id.clone(), access_token, refresh_token))
 }
 
 pub async fn logout_user(redis: &RedisClient, user_id: &str) -> Result<(), String> {
